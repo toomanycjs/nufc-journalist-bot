@@ -1,0 +1,5 @@
+# Left unpinned on purpose: X breaks scraper internals every few weeks,
+# and the fixes ship as new twikit releases. Re-run pip install to update.
+twikit
+atproto
+python-dotenv

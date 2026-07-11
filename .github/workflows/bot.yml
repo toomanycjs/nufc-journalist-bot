@@ -1,0 +1,45 @@
+name: NUFC journalist bot
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # every 15 minutes
+  workflow_dispatch:          # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write             # needed to commit state.json back to the repo
+
+concurrency:
+  group: nufc-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore X session cookies
+        env:
+          X_COOKIES_JSON: ${{ secrets.X_COOKIES_JSON }}
+        run: printf '%s' "$X_COOKIES_JSON" > cookies.json
+
+      - name: Run bot
+        env:
+          BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
+          BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
+        run: python bot.py
+
+      - name: Persist state
+        run: |
+          git config user.name "nufc-bot"
+          git config user.email "nufc-bot@users.noreply.github.com"
+          git add state.json
+          git diff --staged --quiet || git commit -m "Update state [skip ci]"
+          git push
