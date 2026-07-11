@@ -16,7 +16,7 @@ import os
 import re
 from pathlib import Path
 
-from atproto import Client as BskyClient, client_utils
+from atproto import Client as BskyClient, client_utils, models
 from dotenv import load_dotenv
 from twikit import Client as XClient
 
@@ -30,8 +30,11 @@ ROOT = Path(__file__).parent
 STATE_FILE = ROOT / "state.json"
 COOKIES_FILE = ROOT / "cookies.json"
 
-# Bluesky post limit is 300 graphemes; stay a little under to be safe.
-BSKY_LIMIT = 290
+# Bluesky post limit is 300 graphemes. Tweets longer than this are split across
+# a reply thread rather than truncated.
+BSKY_LIMIT = 300
+# Room reserved for the " (i/n)" counter suffix added to each threaded post.
+COUNTER_RESERVE = 9
 # How many tweets to fetch per account each run.
 FETCH_COUNT = 20
 # Safety cap so a long outage can't dump dozens of posts in one burst.
@@ -57,22 +60,46 @@ def clean(text: str) -> str:
     return html.unescape(text or "").strip()
 
 
-def truncate(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1].rstrip() + "…"
-
-
 def compose(display_name: str, screen_name: str, tweet) -> str:
-    """Build the Bluesky post text: attribution header + tweet body."""
+    """Build the full Bluesky post text: attribution header + tweet body.
+
+    No truncation here — length is handled by splitting into a thread at post
+    time (see :func:`split_into_chunks` / :func:`post_thread`).
+    """
     retweeted = getattr(tweet, "retweeted_tweet", None)
     if retweeted is not None:
         body = f"RT @{retweeted.user.screen_name}: {clean(retweeted.text)}"
     else:
         body = clean(tweet.text)
 
-    header = f"{display_name} (@{screen_name})\n\n"
-    return header + truncate(body, BSKY_LIMIT - len(header))
+    return f"{display_name} (@{screen_name})\n\n{body}"
+
+
+def split_into_chunks(text: str, limit: int) -> list[str]:
+    """Split text into <= limit pieces, preferring word (whitespace) boundaries.
+
+    Uses len() (code points) as a conservative proxy for Bluesky's grapheme
+    count — multi-codepoint emoji count as more here, so we only ever split
+    earlier than strictly necessary, never past the real 300-grapheme cap.
+    """
+    chunks: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        while len(word) > limit:  # a single token longer than a whole post
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(word[:limit])
+            word = word[limit:]
+        candidate = word if not current else f"{current} {word}"
+        if len(candidate) <= limit:
+            current = candidate
+        else:
+            chunks.append(current)
+            current = word
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def build_richtext(text: str):
@@ -88,6 +115,30 @@ def build_richtext(text: str):
     if pos < len(text):
         builder.text(text[pos:])
     return builder
+
+
+def post_thread(bsky: BskyClient, full_text: str) -> int:
+    """Post text to Bluesky, splitting into a reply thread if it's too long.
+
+    Returns the number of posts created.
+    """
+    if len(full_text) <= BSKY_LIMIT:
+        chunks = [full_text]
+    else:
+        chunks = split_into_chunks(full_text, BSKY_LIMIT - COUNTER_RESERVE)
+
+    total = len(chunks)
+    root = parent = None
+    for i, chunk in enumerate(chunks, 1):
+        body = chunk if total == 1 else f"{chunk} ({i}/{total})"
+        reply = None
+        if parent is not None:
+            reply = models.AppBskyFeedPost.ReplyRef(parent=parent, root=root)
+        response = bsky.send_post(build_richtext(body), reply_to=reply)
+        ref = models.create_strong_ref(response)
+        root = root or ref
+        parent = ref
+    return total
 
 
 async def collect_new_tweets(x: XClient, screen_name: str, last_id: int):
@@ -141,9 +192,10 @@ async def run() -> None:
         for t in to_post:
             text = compose(user.name, screen_name, t)
             try:
-                bsky.send_post(build_richtext(text))
+                n = post_thread(bsky, text)
                 posted_up_to = int(t.id)
-                print(f"[{screen_name}] posted {t.id}")
+                suffix = f" ({n}-post thread)" if n > 1 else ""
+                print(f"[{screen_name}] posted {t.id}{suffix}")
             except Exception as exc:
                 print(f"[{screen_name}] post failed for {t.id}: {exc!r}")
                 break  # stop so we retry this + later tweets next run
