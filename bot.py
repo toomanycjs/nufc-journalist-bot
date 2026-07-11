@@ -60,6 +60,13 @@ def clean(text: str) -> str:
     return html.unescape(text or "").strip()
 
 
+def tweet_text(tweet) -> str:
+    """Full tweet text, preferring the long-form note text over the legacy
+    280-char version. X Premium 'note tweets' truncate ``.text`` and end it with
+    a t.co self-link; ``.full_text`` carries the complete content."""
+    return getattr(tweet, "full_text", None) or getattr(tweet, "text", None) or ""
+
+
 def compose(display_name: str, screen_name: str, tweet) -> str:
     """Build the full Bluesky post text: attribution header + tweet body.
 
@@ -68,9 +75,9 @@ def compose(display_name: str, screen_name: str, tweet) -> str:
     """
     retweeted = getattr(tweet, "retweeted_tweet", None)
     if retweeted is not None:
-        body = f"RT @{retweeted.user.screen_name}: {clean(retweeted.text)}"
+        body = f"RT @{retweeted.user.screen_name}: {clean(tweet_text(retweeted))}"
     else:
-        body = clean(tweet.text)
+        body = clean(tweet_text(tweet))
 
     return f"{display_name} (@{screen_name})\n\n{body}"
 
