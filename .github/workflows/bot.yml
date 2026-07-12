@@ -2,7 +2,7 @@ name: NUFC journalist bot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes
+    - cron: "*/5 * * * *"   # every 5 minutes (GitHub's minimum; often runs slower under load)
   workflow_dispatch:          # lets you run it manually from the Actions tab
 
 permissions:
