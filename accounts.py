@@ -5,6 +5,8 @@ ACCOUNTS = [
     "CraigHope_DM",      # Craig Hope (Daily Mail)
     "MsiDouglas",        # Mark Douglas
     "LukeEdwardsTele",   # Luke Edwards (Telegraph)
+    "lee_ryder",         # Lee Ryder (Newcastle Chronicle)
+    "JoelBlandSport",    # Joel Bland
 ]
 
 # Display names are fetched live from each X profile, so the comments above
