@@ -1,12 +1,17 @@
-"""NUFC journalist bot.
+"""Football journalist bot.
 
-Reads the latest tweets from a set of X accounts (via twikit, using a cached
-login session) and mirrors new, non-reply tweets to Bluesky (via the atproto
-AT Protocol client).
+Reads the latest tweets from sets of X accounts (via twikit, using a cached
+cookie session) and mirrors new, non-reply tweets to per-club Bluesky accounts
+(via the atproto AT Protocol client).
 
-State (the last tweet id posted per account) lives in state.json so we never
-double-post. On an account's very first run we *seed* — record the current
-newest tweet and post nothing — so we don't flood Bluesky with backfill.
+Which journalists map to which club live in clubs.py; the Bluesky credentials
+per club come from the environment (see load_bsky_accounts).
+
+State lives in state.json, namespaced per club, so we never double-post. On an
+account's very first run we *seed* — record the current newest tweet and post
+nothing — so we don't flood a fresh Bluesky account with backfill. A shared
+"_profiles" cache stores each screen name's numeric id + display name so we only
+resolve a profile once (halving X requests on later runs).
 """
 
 import asyncio
@@ -22,7 +27,7 @@ from twikit import Client as XClient
 
 import twikit_patch  # noqa: F401  # fixes twikit issue #408; remove when fixed upstream
 
-from accounts import ACCOUNTS
+from clubs import CLUBS
 
 load_dotenv()
 
@@ -46,13 +51,38 @@ URL_RE = re.compile(r"https?://\S+")
 
 
 def load_state() -> dict:
-    if STATE_FILE.exists():
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    return {}
+    """Load state.json, migrating the old flat NUFC layout if present.
+
+    Old layout was ``{screen_name: last_id}`` (all string values). New layout is
+    ``{"_profiles": {...}, "<club>": {screen_name: last_id}, ...}``.
+    """
+    if not STATE_FILE.exists():
+        return {}
+    data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    if data and all(isinstance(v, str) for v in data.values()):
+        data = {"nufc": data}  # migrate legacy flat state
+    return data
 
 
 def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def load_bsky_accounts() -> dict:
+    """Return {club: {"handle": ..., "password": ...}}.
+
+    NUFC keeps its original BSKY_HANDLE/BSKY_PASSWORD env vars; all other clubs
+    come from the BSKY_ACCOUNTS JSON secret (which may also override nufc).
+    """
+    accounts: dict = {}
+    handle = os.environ.get("BSKY_HANDLE")
+    password = os.environ.get("BSKY_PASSWORD")
+    if handle and password:
+        accounts["nufc"] = {"handle": handle, "password": password}
+    raw = os.environ.get("BSKY_ACCOUNTS")
+    if raw:
+        accounts.update(json.loads(raw))
+    return accounts
 
 
 def clean(text: str) -> str:
@@ -148,11 +178,19 @@ def post_thread(bsky: BskyClient, full_text: str) -> int:
     return total
 
 
-async def collect_new_tweets(x: XClient, screen_name: str, last_id: int):
-    """Return (user, list of new non-reply tweets sorted oldest-first)."""
+async def resolve_profile(x: XClient, screen_name: str, profiles: dict):
+    """Return (user_id, display_name), resolving via X and caching on first use."""
+    cached = profiles.get(screen_name)
+    if cached and cached.get("id"):
+        return cached["id"], cached.get("name") or screen_name
     user = await x.get_user_by_screen_name(screen_name)
-    tweets = await user.get_tweets("Tweets", count=FETCH_COUNT)
+    profiles[screen_name] = {"id": user.id, "name": user.name}
+    return user.id, user.name
 
+
+async def collect_new_tweets(x: XClient, user_id: str, last_id: int):
+    """Return new non-reply tweets (oldest-first) for a user id."""
+    tweets = await x.get_user_tweets(user_id, "Tweets", count=FETCH_COUNT)
     fresh = []
     for t in tweets:
         if int(t.id) <= last_id:
@@ -160,56 +198,75 @@ async def collect_new_tweets(x: XClient, screen_name: str, last_id: int):
         if getattr(t, "in_reply_to", None):  # skip replies
             continue
         fresh.append(t)
-
     fresh.sort(key=lambda t: int(t.id))  # oldest first
-    return user, fresh
+    return fresh
+
+
+async def process_account(x, bsky, club_state, profiles, label, screen_name) -> None:
+    seeding = screen_name not in club_state
+    last_id = int(club_state.get(screen_name, 0))
+
+    try:
+        user_id, name = await resolve_profile(x, screen_name, profiles)
+        fresh = await collect_new_tweets(x, user_id, last_id)
+    except Exception as exc:  # keep going if one account fails
+        print(f"[{label}] fetch failed: {exc!r}")
+        return
+
+    if not fresh:
+        print(f"[{label}] no new tweets")
+        return
+
+    if seeding:
+        newest = int(fresh[-1].id)
+        club_state[screen_name] = str(newest)
+        print(f"[{label}] seeded at {newest} (skipped {len(fresh)} existing)")
+        return
+
+    to_post = fresh[:MAX_POSTS_PER_ACCOUNT_PER_RUN]
+    posted_up_to = last_id
+    for t in to_post:
+        text = compose(name, screen_name, t)
+        try:
+            n = post_thread(bsky, text)
+            posted_up_to = int(t.id)
+            suffix = f" ({n}-post thread)" if n > 1 else ""
+            print(f"[{label}] posted {t.id}{suffix}")
+        except Exception as exc:
+            print(f"[{label}] post failed for {t.id}: {exc!r}")
+            break  # stop so we retry this + later tweets next run
+
+    club_state[screen_name] = str(posted_up_to)
+    if len(fresh) > len(to_post):
+        print(f"[{label}] {len(fresh) - len(to_post)} more queued for next run")
 
 
 async def run() -> None:
     state = load_state()
+    profiles = state.setdefault("_profiles", {})
 
     x = XClient("en-US")
     x.load_cookies(str(COOKIES_FILE))
 
-    bsky = BskyClient()
-    bsky.login(os.environ["BSKY_HANDLE"], os.environ["BSKY_PASSWORD"])
+    bsky_accounts = load_bsky_accounts()
 
-    for screen_name in ACCOUNTS:
-        seeding = screen_name not in state
-        last_id = int(state.get(screen_name, 0))
+    for club, screen_names in CLUBS.items():
+        creds = bsky_accounts.get(club)
+        if not creds or not screen_names:
+            continue  # club not configured yet — skip
 
         try:
-            user, fresh = await collect_new_tweets(x, screen_name, last_id)
-        except Exception as exc:  # keep going if one account fails
-            print(f"[{screen_name}] fetch failed: {exc!r}")
+            bsky = BskyClient()
+            bsky.login(creds["handle"], creds["password"])
+        except Exception as exc:
+            print(f"[{club}] Bluesky login failed: {exc!r}")
             continue
 
-        if not fresh:
-            print(f"[{screen_name}] no new tweets")
-            continue
-
-        if seeding:
-            newest = int(fresh[-1].id)
-            state[screen_name] = str(newest)
-            print(f"[{screen_name}] seeded at {newest} (skipped {len(fresh)} existing)")
-            continue
-
-        to_post = fresh[:MAX_POSTS_PER_ACCOUNT_PER_RUN]
-        posted_up_to = last_id
-        for t in to_post:
-            text = compose(user.name, screen_name, t)
-            try:
-                n = post_thread(bsky, text)
-                posted_up_to = int(t.id)
-                suffix = f" ({n}-post thread)" if n > 1 else ""
-                print(f"[{screen_name}] posted {t.id}{suffix}")
-            except Exception as exc:
-                print(f"[{screen_name}] post failed for {t.id}: {exc!r}")
-                break  # stop so we retry this + later tweets next run
-
-        state[screen_name] = str(posted_up_to)
-        if len(fresh) > len(to_post):
-            print(f"[{screen_name}] {len(fresh) - len(to_post)} more queued for next run")
+        club_state = state.setdefault(club, {})
+        for screen_name in screen_names:
+            await process_account(
+                x, bsky, club_state, profiles, f"{club}/{screen_name}", screen_name
+            )
 
     save_state(state)
 

@@ -34,6 +34,7 @@ jobs:
         env:
           BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
           BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
+          BSKY_ACCOUNTS: ${{ secrets.BSKY_ACCOUNTS }}
         run: python bot.py
 
       - name: Persist state
