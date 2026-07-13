@@ -1,8 +1,70 @@
 {
-  "CraigHope_DM": "2076694740171378877",
-  "JoelBlandSport": "2076761174599692567",
-  "LukeEdwardsTele": "2076673660148990160",
-  "MsiDouglas": "2076734498671120641",
-  "SkySports_Keith": "2076397814939066556",
-  "lee_ryder": "2076764581423198421"
+  "_profiles": {
+    "CharlieWyett": {
+      "id": "20467609",
+      "name": "Charlie Wyett"
+    },
+    "CraigHope_DM": {
+      "id": "242282643",
+      "name": "Craig Hope"
+    },
+    "JoelBlandSport": {
+      "id": "1534956197685649415",
+      "name": "Joel Bland\ud83c\udff4\udb40\udc67\udb40\udc62\udb40\udc65\udb40\udc6e\udb40\udc67\udb40\udc7f"
+    },
+    "LukeEdwardsTele": {
+      "id": "103002142",
+      "name": "Luke Edwards"
+    },
+    "MartinLipton": {
+      "id": "94578515",
+      "name": "Martin Lipton"
+    },
+    "MsiDouglas": {
+      "id": "19150701",
+      "name": "Mark Douglas"
+    },
+    "SamLee": {
+      "id": "30720839",
+      "name": "Sam Lee"
+    },
+    "SkySports_Keith": {
+      "id": "151838694",
+      "name": "Keith Downie"
+    },
+    "SunMartinB": {
+      "id": "326125935",
+      "name": "Martin Blackburn"
+    },
+    "lee_ryder": {
+      "id": "20383794",
+      "name": "Lee Ryder"
+    },
+    "siphillipssport": {
+      "id": "580717432",
+      "name": "Simon Phillips"
+    },
+    "spbajko": {
+      "id": "215972178",
+      "name": "Simon Bajkowski"
+    }
+  },
+  "chelsea": {
+    "CharlieWyett": "2076766554818044088",
+    "MartinLipton": "2072896629477109888",
+    "siphillipssport": "2076702437314830653"
+  },
+  "mancity": {
+    "SamLee": "2076582126900719854",
+    "SunMartinB": "2054448806268203333",
+    "spbajko": "2075550616093409384"
+  },
+  "nufc": {
+    "CraigHope_DM": "2076694740171378877",
+    "JoelBlandSport": "2076761174599692567",
+    "LukeEdwardsTele": "2076673660148990160",
+    "MsiDouglas": "2076771867130491030",
+    "SkySports_Keith": "2076397814939066556",
+    "lee_ryder": "2076764581423198421"
+  }
 }
