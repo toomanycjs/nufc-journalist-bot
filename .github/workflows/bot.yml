@@ -35,6 +35,14 @@ jobs:
           BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
           BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
           BSKY_ACCOUNTS: ${{ secrets.BSKY_ACCOUNTS }}
+          # Per-club secrets (preferred): each holds {"handle":...,"password":...}
+          # and overrides the combined BSKY_ACCOUNTS blob. Empty = ignored.
+          BSKY_CHELSEA: ${{ secrets.BSKY_CHELSEA }}
+          BSKY_MANUTD: ${{ secrets.BSKY_MANUTD }}
+          BSKY_MANCITY: ${{ secrets.BSKY_MANCITY }}
+          BSKY_LIVERPOOL: ${{ secrets.BSKY_LIVERPOOL }}
+          BSKY_ARSENAL: ${{ secrets.BSKY_ARSENAL }}
+          BSKY_SPURS: ${{ secrets.BSKY_SPURS }}
         run: python bot.py
 
       - name: Persist state

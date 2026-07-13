@@ -71,17 +71,32 @@ def save_state(state: dict) -> None:
 def load_bsky_accounts() -> dict:
     """Return {club: {"handle": ..., "password": ...}}.
 
-    NUFC keeps its original BSKY_HANDLE/BSKY_PASSWORD env vars; all other clubs
-    come from the BSKY_ACCOUNTS JSON secret (which may also override nufc).
+    Credentials are resolved from the environment in increasing priority:
+      1. NUFC's original BSKY_HANDLE / BSKY_PASSWORD.
+      2. A combined BSKY_ACCOUNTS JSON secret: {club: {handle, password}}.
+      3. Per-club secrets BSKY_<CLUB> (e.g. BSKY_MANUTD) holding
+         {"handle": ..., "password": ...} — these OVERRIDE the combined blob.
+
+    Per-club secrets are the preferred way to add/fix a club, because a GitHub
+    secret is write-only: editing the combined blob means re-entering every
+    club, whereas a per-club secret only ever touches that one club.
     """
     accounts: dict = {}
+
     handle = os.environ.get("BSKY_HANDLE")
     password = os.environ.get("BSKY_PASSWORD")
     if handle and password:
         accounts["nufc"] = {"handle": handle, "password": password}
+
     raw = os.environ.get("BSKY_ACCOUNTS")
     if raw:
         accounts.update(json.loads(raw))
+
+    for club in CLUBS:
+        per_club = os.environ.get(f"BSKY_{club.upper()}")
+        if per_club:
+            accounts[club] = json.loads(per_club)
+
     return accounts
 
 
