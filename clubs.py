@@ -23,10 +23,34 @@ CLUBS = {
         "lee_ryder",         # Lee Ryder (Newcastle Chronicle)
         "JoelBlandSport",    # Joel Bland
     ],
-    "chelsea": [],
-    "manutd": [],
-    "mancity": [],
-    "liverpool": [],
-    "arsenal": [],
-    "spurs": [],
+    "chelsea": [
+        "CharlieWyett",      # Charlie Wyett (The Sun, Football Editor)
+        "MartinLipton",      # Martin Lipton (The Sun)
+        "siphillipssport",   # Simon Phillips (independent / Substack)
+    ],
+    "manutd": [
+        "ChrisWheelerDM",    # Chris Wheeler (Daily Mail)
+        "MikeKeegan_DM",     # Mike Keegan (Daily Mail)
+        "hirstclass",        # Paul Hirst (The Times)
+        "samuelluckhurst",   # Samuel Luckhurst (The Sun)
+    ],
+    "mancity": [
+        "spbajko",           # Simon Bajkowski (Manchester Evening News)
+        "SamLee",            # Sam Lee (The Athletic)
+        "SunMartinB",        # Martin Blackburn (The Sun)
+    ],
+    "liverpool": [
+        "LewisSteele_",      # Lewis Steele (Daily Mail)
+        "DKingTelegraph",    # Dominic King (The Telegraph)
+        "MattAddison97",     # Matt Addison (Reach / Liverpool.com)
+    ],
+    "arsenal": [
+        "johncrossmirror",   # John Cross (Daily Mirror)
+        "kayakaynak97",      # Kaya Kaynak (football.london)
+        "charles_watts",     # Charles Watts (independent / GOAL)
+    ],
+    "spurs": [
+        "TomBarclay_",       # Tom Barclay (The Sun)
+        "scott_trotter",     # Scott Trotter (Daily Mirror)
+    ],
 }
