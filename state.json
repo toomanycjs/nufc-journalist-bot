@@ -4,6 +4,10 @@
       "id": "20467609",
       "name": "Charlie Wyett"
     },
+    "ChrisWheelerDM": {
+      "id": "538861127",
+      "name": "Chris Wheeler"
+    },
     "CraigHope_DM": {
       "id": "242282643",
       "name": "Craig Hope"
@@ -19,6 +23,10 @@
     "MartinLipton": {
       "id": "94578515",
       "name": "Martin Lipton"
+    },
+    "MikeKeegan_DM": {
+      "id": "45833180",
+      "name": "Mike Keegan"
     },
     "MsiDouglas": {
       "id": "19150701",
@@ -36,9 +44,17 @@
       "id": "326125935",
       "name": "Martin Blackburn"
     },
+    "hirstclass": {
+      "id": "137719594",
+      "name": "Paul Hirst"
+    },
     "lee_ryder": {
       "id": "20383794",
       "name": "Lee Ryder"
+    },
+    "samuelluckhurst": {
+      "id": "182301693",
+      "name": "Samuel Luckhurst"
     },
     "siphillipssport": {
       "id": "580717432",
@@ -58,6 +74,12 @@
     "SamLee": "2076582126900719854",
     "SunMartinB": "2054448806268203333",
     "spbajko": "2075550616093409384"
+  },
+  "manutd": {
+    "ChrisWheelerDM": "2076663123688276160",
+    "MikeKeegan_DM": "2076764107760406607",
+    "hirstclass": "2076327569855521093",
+    "samuelluckhurst": "2076703556862714155"
   },
   "nufc": {
     "CraigHope_DM": "2076694740171378877",
