@@ -22,6 +22,7 @@ CLUBS = {
         "LukeEdwardsTele",   # Luke Edwards (Telegraph)
         "lee_ryder",         # Lee Ryder (Newcastle Chronicle)
         "JoelBlandSport",    # Joel Bland
+        "CiaranKelly__",     # Ciaran Kelly (Newcastle Chronicle)
     ],
     "chelsea": [
         "CharlieWyett",      # Charlie Wyett (The Sun, Football Editor)
