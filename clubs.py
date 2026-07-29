@@ -23,5 +23,6 @@ CLUBS = {
         "JoelBlandSport",    # Joel Bland
         "CiaranKelly__",     # Ciaran Kelly (Newcastle Chronicle)
         "olly_hawk",         # Olly Hawkins
+        "NUFC",              # Newcastle United (official club account)
     ],
 }
