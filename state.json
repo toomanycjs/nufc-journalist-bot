@@ -1,13 +1,5 @@
 {
   "_profiles": {
-    "CharlieWyett": {
-      "id": "20467609",
-      "name": "Charlie Wyett"
-    },
-    "ChrisWheelerDM": {
-      "id": "538861127",
-      "name": "Chris Wheeler"
-    },
     "CiaranKelly__": {
       "id": "2826405084",
       "name": "Ciaran Kelly"
@@ -24,66 +16,14 @@
       "id": "103002142",
       "name": "Luke Edwards"
     },
-    "MartinLipton": {
-      "id": "94578515",
-      "name": "Martin Lipton"
-    },
-    "MikeKeegan_DM": {
-      "id": "45833180",
-      "name": "Mike Keegan"
-    },
     "MsiDouglas": {
       "id": "19150701",
       "name": "Mark Douglas"
     },
-    "SamLee": {
-      "id": "30720839",
-      "name": "Sam Lee"
-    },
     "SkySports_Keith": {
       "id": "151838694",
       "name": "Keith Downie"
-    },
-    "SunMartinB": {
-      "id": "326125935",
-      "name": "Martin Blackburn"
-    },
-    "hirstclass": {
-      "id": "137719594",
-      "name": "Paul Hirst"
-    },
-    "lee_ryder": {
-      "id": "20383794",
-      "name": "Lee Ryder"
-    },
-    "samuelluckhurst": {
-      "id": "182301693",
-      "name": "Samuel Luckhurst"
-    },
-    "siphillipssport": {
-      "id": "580717432",
-      "name": "Simon Phillips"
-    },
-    "spbajko": {
-      "id": "215972178",
-      "name": "Simon Bajkowski"
     }
-  },
-  "chelsea": {
-    "CharlieWyett": "2079082727559647379",
-    "MartinLipton": "2079612444880548309",
-    "siphillipssport": "2082352475881807945"
-  },
-  "mancity": {
-    "SamLee": "2082070085322084387",
-    "SunMartinB": "2054448806268203333",
-    "spbajko": "2082384674916331807"
-  },
-  "manutd": {
-    "ChrisWheelerDM": "2082388122084561099",
-    "MikeKeegan_DM": "2081413004952748070",
-    "hirstclass": "2078916313792102492",
-    "samuelluckhurst": "2082176640377835673"
   },
   "nufc": {
     "CiaranKelly__": "2081048012168532163",
@@ -91,7 +31,6 @@
     "JoelBlandSport": "2082376732879855892",
     "LukeEdwardsTele": "2082403519269675184",
     "MsiDouglas": "2081992960971784622",
-    "SkySports_Keith": "2081791725840863337",
-    "lee_ryder": "2082411567526580332"
+    "SkySports_Keith": "2081791725840863337"
   }
 }
