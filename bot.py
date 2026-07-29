@@ -21,6 +21,7 @@ import os
 import re
 from pathlib import Path
 
+import httpx
 from atproto import Client as BskyClient, client_utils, models
 from dotenv import load_dotenv
 from twikit import Client as XClient
@@ -112,6 +113,37 @@ def tweet_text(tweet) -> str:
     return getattr(tweet, "full_text", None) or getattr(tweet, "text", None) or ""
 
 
+def image_urls(tweet) -> list[str]:
+    """Return up to 4 photo URLs from a tweet (from the retweeted tweet if it's
+    a retweet). Requests the 'medium' size so blobs stay under Bluesky's ~1MB
+    limit. Videos and GIFs are skipped."""
+    source = getattr(tweet, "retweeted_tweet", None) or tweet
+    urls: list[str] = []
+    for m in getattr(source, "media", None) or []:
+        if type(m).__name__ != "Photo":
+            continue
+        url = getattr(m, "media_url", None)
+        if not url:
+            continue
+        base = url.split("?")[0]
+        head, _, ext = base.rpartition(".")
+        urls.append(f"{head}?format={ext}&name=medium" if head else url)
+    return urls[:4]
+
+
+def fetch_images(tweet) -> list[bytes]:
+    """Download a tweet's photos. Failures are logged and skipped, not fatal."""
+    images: list[bytes] = []
+    for url in image_urls(tweet):
+        try:
+            resp = httpx.get(url, timeout=20.0, follow_redirects=True)
+            resp.raise_for_status()
+            images.append(resp.content)
+        except Exception as exc:
+            print(f"  image fetch failed ({url}): {exc!r}")
+    return images
+
+
 def compose(display_name: str, screen_name: str, tweet) -> str:
     """Build the full Bluesky post text: attribution header + tweet body.
 
@@ -169,11 +201,14 @@ def build_richtext(text: str):
     return builder
 
 
-def post_thread(bsky: BskyClient, full_text: str) -> int:
+def post_thread(bsky: BskyClient, full_text: str, images: list[bytes] | None = None) -> int:
     """Post text to Bluesky, splitting into a reply thread if it's too long.
 
+    Any images are attached to the first post. If attaching images fails (e.g.
+    a blob is over Bluesky's size limit), that post falls back to text-only.
     Returns the number of posts created.
     """
+    images = images or []
     if len(full_text) <= BSKY_LIMIT:
         chunks = [full_text]
     else:
@@ -186,7 +221,16 @@ def post_thread(bsky: BskyClient, full_text: str) -> int:
         reply = None
         if parent is not None:
             reply = models.AppBskyFeedPost.ReplyRef(parent=parent, root=root)
-        response = bsky.send_post(build_richtext(body), reply_to=reply)
+
+        if i == 1 and images:
+            try:
+                response = bsky.send_images(build_richtext(body), images=images, reply_to=reply)
+            except Exception as exc:
+                print(f"  image attach failed, posting text only: {exc!r}")
+                response = bsky.send_post(build_richtext(body), reply_to=reply)
+        else:
+            response = bsky.send_post(build_richtext(body), reply_to=reply)
+
         ref = models.create_strong_ref(response)
         root = root or ref
         parent = ref
@@ -242,10 +286,16 @@ async def process_account(x, bsky, club_state, profiles, label, screen_name) -> 
     posted_up_to = last_id
     for t in to_post:
         text = compose(name, screen_name, t)
+        images = fetch_images(t)
         try:
-            n = post_thread(bsky, text)
+            n = post_thread(bsky, text, images)
             posted_up_to = int(t.id)
-            suffix = f" ({n}-post thread)" if n > 1 else ""
+            bits = []
+            if n > 1:
+                bits.append(f"{n}-post thread")
+            if images:
+                bits.append(f"{len(images)} image{'s' if len(images) > 1 else ''}")
+            suffix = f" ({', '.join(bits)})" if bits else ""
             print(f"[{label}] posted {t.id}{suffix}")
         except Exception as exc:
             print(f"[{label}] post failed for {t.id}: {exc!r}")
