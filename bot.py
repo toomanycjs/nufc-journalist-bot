@@ -23,6 +23,7 @@ from pathlib import Path
 
 import httpx
 from atproto import Client as BskyClient, client_utils, models
+from atproto_client.request import Request
 from dotenv import load_dotenv
 from twikit import Client as XClient
 
@@ -47,6 +48,14 @@ FETCH_COUNT = 20
 # Overflow is NOT lost — state only advances to the last tweet we actually
 # posted, so the rest are picked up on the next run.
 MAX_POSTS_PER_ACCOUNT_PER_RUN = 8
+
+# Video guardrails. If a clip is longer/bigger than these (or Bluesky rejects
+# it, e.g. daily video cap), we fall back to posting its thumbnail + text.
+MAX_VIDEO_SECONDS = 180
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
+PREFERRED_MAX_BITRATE = 2_800_000  # prefer ~720p to keep uploads fast/reliable
+# Video blobs upload slowly; the default atproto timeout is too short for them.
+BSKY_TIMEOUT = httpx.Timeout(180.0)
 
 URL_RE = re.compile(r"https?://\S+")
 
@@ -113,13 +122,26 @@ def tweet_text(tweet) -> str:
     return getattr(tweet, "full_text", None) or getattr(tweet, "text", None) or ""
 
 
+def _try_fetch(url: str, timeout: float = 20.0) -> bytes | None:
+    """Download a URL to bytes; log and return None on failure."""
+    try:
+        resp = httpx.get(url, timeout=timeout, follow_redirects=True)
+        resp.raise_for_status()
+        return resp.content
+    except Exception as exc:
+        print(f"  media fetch failed ({url}): {exc!r}")
+        return None
+
+
+def media_source(tweet):
+    """The tweet carrying the media (the retweeted tweet if it's a retweet)."""
+    return getattr(tweet, "retweeted_tweet", None) or tweet
+
+
 def image_urls(tweet) -> list[str]:
-    """Return up to 4 photo URLs from a tweet (from the retweeted tweet if it's
-    a retweet). Requests the 'medium' size so blobs stay under Bluesky's ~1MB
-    limit. Videos and GIFs are skipped."""
-    source = getattr(tweet, "retweeted_tweet", None) or tweet
+    """Up to 4 photo URLs at 'medium' size (keeps blobs under Bluesky's limit)."""
     urls: list[str] = []
-    for m in getattr(source, "media", None) or []:
+    for m in getattr(media_source(tweet), "media", None) or []:
         if type(m).__name__ != "Photo":
             continue
         url = getattr(m, "media_url", None)
@@ -132,16 +154,80 @@ def image_urls(tweet) -> list[str]:
 
 
 def fetch_images(tweet) -> list[bytes]:
-    """Download a tweet's photos. Failures are logged and skipped, not fatal."""
-    images: list[bytes] = []
-    for url in image_urls(tweet):
+    """Download a tweet's photos. Failures are skipped, not fatal."""
+    return [b for b in (_try_fetch(u) for u in image_urls(tweet)) if b]
+
+
+def pick_video_stream(media) -> str | None:
+    """Choose an MP4 stream URL that should fit Bluesky's limits, or None.
+
+    Prefers the highest bitrate at or below ~720p; if a clip is too long or the
+    estimated size is too big, returns None so we fall back to the thumbnail.
+    """
+    duration = (getattr(media, "duration_millis", 0) or 0) / 1000
+    if duration and duration > MAX_VIDEO_SECONDS:
+        return None
+    streams = sorted(
+        (
+            (getattr(s, "bitrate", 0) or 0, getattr(s, "url", None))
+            for s in getattr(media, "streams", None) or []
+            if getattr(s, "url", None) and getattr(s, "bitrate", None)
+        )
+    )  # ascending by bitrate
+    if not streams:
+        return None
+    chosen = None
+    for bitrate, url in streams:
+        if bitrate <= PREFERRED_MAX_BITRATE:
+            chosen = (bitrate, url)
+    chosen = chosen or streams[0]  # else the smallest available
+    bitrate, url = chosen
+    if duration and (bitrate * duration / 8) > MAX_VIDEO_BYTES:
+        return None
+    return url
+
+
+def fetch_media(tweet) -> dict:
+    """Return {"images": [...], "video": bytes|None, "thumb": bytes|None}.
+
+    A tweet has either photos or one video/GIF (X doesn't mix them). For video
+    we download a size-capped MP4 plus the thumbnail (used as a fallback image
+    if the video can't be sent).
+    """
+    for m in getattr(media_source(tweet), "media", None) or []:
+        if type(m).__name__ in ("Video", "AnimatedGif"):
+            thumb_url = getattr(m, "media_url", None)
+            video_url = pick_video_stream(m)
+            return {
+                "images": [],
+                "video": _try_fetch(video_url, timeout=90.0) if video_url else None,
+                "thumb": _try_fetch(thumb_url) if thumb_url else None,
+            }
+    return {"images": fetch_images(tweet), "video": None, "thumb": None}
+
+
+def send_media_post(bsky: BskyClient, body: str, media: dict, reply):
+    """Send a post with its media, degrading gracefully: video -> thumbnail
+    image -> text-only."""
+    video = media.get("video")
+    thumb = media.get("thumb")
+    images = list(media.get("images") or [])
+
+    if video:
         try:
-            resp = httpx.get(url, timeout=20.0, follow_redirects=True)
-            resp.raise_for_status()
-            images.append(resp.content)
+            return bsky.send_video(build_richtext(body), video=video, reply_to=reply)
         except Exception as exc:
-            print(f"  image fetch failed ({url}): {exc!r}")
-    return images
+            print(f"  video attach failed, falling back to thumbnail: {exc!r}")
+            images = [thumb] if thumb else []
+    elif thumb and not images:
+        images = [thumb]  # video existed but wasn't usable -> post its thumbnail
+
+    if images:
+        try:
+            return bsky.send_images(build_richtext(body), images=images, reply_to=reply)
+        except Exception as exc:
+            print(f"  image attach failed, posting text only: {exc!r}")
+    return bsky.send_post(build_richtext(body), reply_to=reply)
 
 
 def compose(display_name: str, screen_name: str, tweet) -> str:
@@ -201,14 +287,14 @@ def build_richtext(text: str):
     return builder
 
 
-def post_thread(bsky: BskyClient, full_text: str, images: list[bytes] | None = None) -> int:
+def post_thread(bsky: BskyClient, full_text: str, media: dict | None = None) -> int:
     """Post text to Bluesky, splitting into a reply thread if it's too long.
 
-    Any images are attached to the first post. If attaching images fails (e.g.
-    a blob is over Bluesky's size limit), that post falls back to text-only.
-    Returns the number of posts created.
+    Any media (video or images) is attached to the first post, degrading
+    gracefully to a thumbnail and then to text-only. Returns the post count.
     """
-    images = images or []
+    media = media or {}
+    has_media = bool(media.get("video") or media.get("thumb") or media.get("images"))
     if len(full_text) <= BSKY_LIMIT:
         chunks = [full_text]
     else:
@@ -222,12 +308,8 @@ def post_thread(bsky: BskyClient, full_text: str, images: list[bytes] | None = N
         if parent is not None:
             reply = models.AppBskyFeedPost.ReplyRef(parent=parent, root=root)
 
-        if i == 1 and images:
-            try:
-                response = bsky.send_images(build_richtext(body), images=images, reply_to=reply)
-            except Exception as exc:
-                print(f"  image attach failed, posting text only: {exc!r}")
-                response = bsky.send_post(build_richtext(body), reply_to=reply)
+        if i == 1 and has_media:
+            response = send_media_post(bsky, body, media, reply)
         else:
             response = bsky.send_post(build_richtext(body), reply_to=reply)
 
@@ -286,15 +368,20 @@ async def process_account(x, bsky, club_state, profiles, label, screen_name) -> 
     posted_up_to = last_id
     for t in to_post:
         text = compose(name, screen_name, t)
-        images = fetch_images(t)
+        media = fetch_media(t)
         try:
-            n = post_thread(bsky, text, images)
+            n = post_thread(bsky, text, media)
             posted_up_to = int(t.id)
             bits = []
             if n > 1:
                 bits.append(f"{n}-post thread")
-            if images:
-                bits.append(f"{len(images)} image{'s' if len(images) > 1 else ''}")
+            if media.get("video"):
+                bits.append("video")
+            n_img = len(media.get("images") or [])
+            if n_img:
+                bits.append(f"{n_img} image{'s' if n_img > 1 else ''}")
+            elif media.get("thumb") and not media.get("video"):
+                bits.append("thumbnail")
             suffix = f" ({', '.join(bits)})" if bits else ""
             print(f"[{label}] posted {t.id}{suffix}")
         except Exception as exc:
@@ -321,7 +408,7 @@ async def run() -> None:
             continue  # club not configured yet — skip
 
         try:
-            bsky = BskyClient()
+            bsky = BskyClient(request=Request(timeout=BSKY_TIMEOUT))
             bsky.login(creds["handle"], creds["password"])
         except Exception as exc:
             print(f"[{club}] Bluesky login failed: {exc!r}")
