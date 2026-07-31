@@ -24,6 +24,18 @@
       "id": "35758259",
       "name": "Newcastle United"
     },
+    "NUFC360": {
+      "id": "3094453874",
+      "name": "NUFC360"
+    },
+    "NUFCBlogcouk": {
+      "id": "242062719",
+      "name": "NUFC Blog"
+    },
+    "NUFCMurph": {
+      "id": "1582481266124804098",
+      "name": "Murph"
+    },
     "SkySports_Keith": {
       "id": "151838694",
       "name": "Keith Downie"
@@ -40,6 +52,9 @@
     "LukeEdwardsTele": "2082884730840637460",
     "MsiDouglas": "2082915552700301699",
     "NUFC": "2082584803862303120",
+    "NUFC360": "2083191068036563000",
+    "NUFCBlogcouk": "2083206698223755294",
+    "NUFCMurph": "2083204495685615947",
     "SkySports_Keith": "2083126461012042178",
     "olly_hawk": "2083206145049612605"
   }
