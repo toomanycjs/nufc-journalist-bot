@@ -2,7 +2,7 @@ name: NUFC journalist bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # every 5 minutes (GitHub's minimum; often runs slower under load)
+    - cron: "*/30 * * * *"   # restart the loop periodically; the loop itself polls every 5 min
   workflow_dispatch:          # lets you run it manually from the Actions tab
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: nufc-bot
-  cancel-in-progress: false
+  cancel-in-progress: true    # never let two loops run at once (prevents double-posting)
 
 jobs:
   run:
@@ -35,22 +35,16 @@ jobs:
         env:
           BSKY_HANDLE: ${{ secrets.BSKY_HANDLE }}
           BSKY_PASSWORD: ${{ secrets.BSKY_PASSWORD }}
+          PERSIST_GIT: "1"    # tells bot.py to commit + push state itself, per account
         run: |
           git config user.name "nufc-bot"
           git config user.email "nufc-bot@users.noreply.github.com"
-          # GitHub throttles scheduled starts to roughly hourly, so instead of
-          # relying on that, each started job self-polls every 5 min for ~4h.
-          # The concurrency group (above) keeps exactly one restart queued, which
-          # begins the instant this job ends -> near-continuous 5-min coverage.
+          # GitHub throttles scheduled starts, so each started job self-polls
+          # every 5 min for ~4h. bot.py commits+pushes state after each account
+          # that posts, so even a cancelled/overlapping run can't double-post.
           END=$(( $(date +%s) + 4*60*60 ))
           while true; do
             python bot.py || true
-            git add state.json
-            if ! git diff --staged --quiet; then
-              git commit -q -m "Update state [skip ci]"
-              git pull -q --rebase --autostash || true
-              git push -q || true
-            fi
             [ "$(date +%s)" -ge "$END" ] && break
             sleep 300
           done

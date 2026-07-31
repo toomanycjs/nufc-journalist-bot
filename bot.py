@@ -19,6 +19,7 @@ import html
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -76,6 +77,28 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def persist_state(state: dict) -> None:
+    """Save state to disk and, in CI (PERSIST_GIT=1), immediately commit + push.
+
+    Pushing after every account that posts — rather than once at the end —
+    means a run that is cancelled or that overlaps another can't cause the next
+    run to repost: the newest state is already in the repo. The ``git pull``
+    also pulls in any other run's/manual pushes so they converge.
+    """
+    save_state(state)
+    if os.environ.get("PERSIST_GIT") != "1":
+        return
+    try:
+        subprocess.run(["git", "add", "state.json"], cwd=ROOT, check=True)
+        if subprocess.run(["git", "diff", "--staged", "--quiet"], cwd=ROOT).returncode == 0:
+            return  # nothing changed
+        subprocess.run(["git", "commit", "-q", "-m", "Update state [skip ci]"], cwd=ROOT, check=True)
+        subprocess.run(["git", "pull", "-q", "--rebase", "--autostash"], cwd=ROOT, check=False)
+        subprocess.run(["git", "push", "-q"], cwd=ROOT, check=False)
+    except Exception as exc:
+        print(f"  state persist failed: {exc!r}")
 
 
 def load_bsky_accounts() -> dict:
@@ -343,7 +366,9 @@ async def collect_new_tweets(x: XClient, user_id: str, last_id: int):
     return fresh
 
 
-async def process_account(x, bsky, club_state, profiles, label, screen_name) -> None:
+async def process_account(x, bsky, club_state, profiles, label, screen_name) -> bool:
+    """Post any new tweets for one account. Returns True if state changed
+    (seeded or posted), so the caller can persist immediately."""
     seeding = screen_name not in club_state
     last_id = int(club_state.get(screen_name, 0))
 
@@ -352,17 +377,17 @@ async def process_account(x, bsky, club_state, profiles, label, screen_name) -> 
         fresh = await collect_new_tweets(x, user_id, last_id)
     except Exception as exc:  # keep going if one account fails
         print(f"[{label}] fetch failed: {exc!r}")
-        return
+        return False
 
     if not fresh:
         print(f"[{label}] no new tweets")
-        return
+        return False
 
     if seeding:
         newest = int(fresh[-1].id)
         club_state[screen_name] = str(newest)
         print(f"[{label}] seeded at {newest} (skipped {len(fresh)} existing)")
-        return
+        return True
 
     to_post = fresh[:MAX_POSTS_PER_ACCOUNT_PER_RUN]
     posted_up_to = last_id
@@ -388,9 +413,12 @@ async def process_account(x, bsky, club_state, profiles, label, screen_name) -> 
             print(f"[{label}] post failed for {t.id}: {exc!r}")
             break  # stop so we retry this + later tweets next run
 
-    club_state[screen_name] = str(posted_up_to)
+    changed = posted_up_to != last_id
+    if changed:
+        club_state[screen_name] = str(posted_up_to)
     if len(fresh) > len(to_post):
         print(f"[{label}] {len(fresh) - len(to_post)} more queued for next run")
+    return changed
 
 
 async def run() -> None:
@@ -416,11 +444,13 @@ async def run() -> None:
 
         club_state = state.setdefault(club, {})
         for screen_name in screen_names:
-            await process_account(
+            changed = await process_account(
                 x, bsky, club_state, profiles, f"{club}/{screen_name}", screen_name
             )
+            if changed:
+                persist_state(state)  # push immediately so overlaps can't repost
 
-    save_state(state)
+    persist_state(state)
 
 
 if __name__ == "__main__":
