@@ -25,7 +25,6 @@ CLUBS = {
         "olly_hawk",         # Olly Hawkins
         "NUFC",              # Newcastle United (official club account)
         "NUFCBlogcouk",      # NUFC Blog
-        "NUFCMurph",         # Murph
         "NUFC360",           # NUFC360
     ],
 }
