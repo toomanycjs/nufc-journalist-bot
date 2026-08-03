@@ -26,5 +26,6 @@ CLUBS = {
         "NUFC",              # Newcastle United (official club account)
         "NUFCBlogcouk",      # NUFC Blog
         "NUFC360",           # NUFC360
+        "mhardysport",       # Martin Hardy (The Times)
     ],
 }
