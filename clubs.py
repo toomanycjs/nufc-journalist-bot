@@ -27,5 +27,6 @@ CLUBS = {
         "NUFCBlogcouk",      # NUFC Blog
         "NUFC360",           # NUFC360
         "mhardysport",       # Martin Hardy (The Times)
+        "DomScurr",          # Dominic Scurr
     ],
 }
