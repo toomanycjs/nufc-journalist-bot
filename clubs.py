@@ -28,5 +28,6 @@ CLUBS = {
         "NUFC360",           # NUFC360
         "mhardysport",       # Martin Hardy (The Times)
         "DomScurr",          # Dominic Scurr
+        "Ollie_Gillman",     # Ollie Gillman (MailOnline) — dormant since Jan 2023
     ],
 }
