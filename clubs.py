@@ -24,7 +24,6 @@ CLUBS = {
         "CiaranKelly__",     # Ciaran Kelly (Newcastle Chronicle)
         "olly_hawk",         # Olly Hawkins
         "NUFC",              # Newcastle United (official club account)
-        "NUFCBlogcouk",      # NUFC Blog
         "NUFC360",           # NUFC360
         "mhardysport",       # Martin Hardy (The Times)
         "DomScurr",          # Dominic Scurr
