@@ -157,8 +157,18 @@ def _try_fetch(url: str, timeout: float = 20.0) -> bytes | None:
 
 
 def media_source(tweet):
-    """The tweet carrying the media (the retweeted tweet if it's a retweet)."""
-    return getattr(tweet, "retweeted_tweet", None) or tweet
+    """The tweet carrying the media.
+
+    Prefers the retweeted tweet for retweets, and falls back to the quoted
+    tweet when a quote tweet has no media of its own (on X the visible image
+    is usually the quoted post's).
+    """
+    source = getattr(tweet, "retweeted_tweet", None) or tweet
+    if not (getattr(source, "media", None) or []):
+        quote = getattr(source, "quote", None)
+        if quote is not None and (getattr(quote, "media", None) or []):
+            return quote
+    return source
 
 
 def image_urls(tweet) -> list[str]:
@@ -253,8 +263,18 @@ def send_media_post(bsky: BskyClient, body: str, media: dict, reply):
     return bsky.send_post(build_richtext(body), reply_to=reply)
 
 
+def quoted_tweet(tweet):
+    """The tweet this one quotes, if any (checks the retweeted tweet too)."""
+    source = getattr(tweet, "retweeted_tweet", None) or tweet
+    return getattr(source, "quote", None)
+
+
 def compose(display_name: str, screen_name: str, tweet) -> str:
     """Build the full Bluesky post text: attribution header + tweet body.
+
+    Quote tweets get the quoted tweet's author and text appended, since
+    Bluesky can't embed an X post — without this the post loses the context it
+    was replying to and reads as a non-sequitur.
 
     No truncation here — length is handled by splitting into a thread at post
     time (see :func:`split_into_chunks` / :func:`post_thread`).
@@ -264,6 +284,14 @@ def compose(display_name: str, screen_name: str, tweet) -> str:
         body = f"RT @{retweeted.user.screen_name}: {clean(tweet_text(retweeted))}"
     else:
         body = clean(tweet_text(tweet))
+
+    quote = quoted_tweet(tweet)
+    if quote is not None:
+        q_handle = getattr(getattr(quote, "user", None), "screen_name", None)
+        q_text = clean(tweet_text(quote))
+        if q_text or q_handle:
+            attribution = f"@{q_handle}" if q_handle else "a post"
+            body = f"{body}\n\n[Quoting {attribution}: {q_text}]"
 
     return f"{display_name} (@{screen_name})\n\n{body}"
 
