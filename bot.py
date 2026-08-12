@@ -269,6 +269,14 @@ def quoted_tweet(tweet):
     return getattr(source, "quote", None)
 
 
+def quoted_permalink(tweet) -> str | None:
+    """Link to the quoted tweet, when its content wasn't returned by X."""
+    source = getattr(tweet, "retweeted_tweet", None) or tweet
+    legacy = getattr(source, "_data", None) or {}
+    permalink = (legacy.get("legacy") or {}).get("quoted_status_permalink") or {}
+    return permalink.get("expanded")
+
+
 def compose(display_name: str, screen_name: str, tweet) -> str:
     """Build the full Bluesky post text: attribution header + tweet body.
 
@@ -292,6 +300,13 @@ def compose(display_name: str, screen_name: str, tweet) -> str:
         if q_text or q_handle:
             attribution = f"@{q_handle}" if q_handle else "a post"
             body = f"{body}\n\n[Quoting {attribution}: {q_text}]"
+    else:
+        # X sometimes withholds the quoted tweet entirely (deleted, or from a
+        # suspended/protected account). Fall back to its permalink so the post
+        # still shows it was quoting something, rather than reading oddly.
+        link = quoted_permalink(tweet)
+        if link:
+            body = f"{body}\n\n[Quoting: {link}]"
 
     return f"{display_name} (@{screen_name})\n\n{body}"
 
