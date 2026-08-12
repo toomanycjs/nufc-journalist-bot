@@ -27,6 +27,8 @@ from atproto import Client as BskyClient, client_utils, models
 from atproto_client.request import Request
 from dotenv import load_dotenv
 from twikit import Client as XClient
+from twikit.tweet import tweet_from_data
+from twikit.utils import find_dict
 
 import twikit_patch  # noqa: F401  # fixes twikit issue #408; remove when fixed upstream
 
@@ -49,6 +51,8 @@ FETCH_COUNT = 20
 # Overflow is NOT lost — state only advances to the last tweet we actually
 # posted, so the rest are picked up on the next run.
 MAX_POSTS_PER_ACCOUNT_PER_RUN = 8
+# How many levels of "quote of a quote" to follow (X embeds only one).
+MAX_QUOTE_DEPTH = 3
 
 # Video guardrails. If a clip is longer/bigger than these (or Bluesky rejects
 # it, e.g. daily video cap), we fall back to posting its thumbnail + text.
@@ -156,25 +160,30 @@ def _try_fetch(url: str, timeout: float = 20.0) -> bytes | None:
         return None
 
 
-def media_source(tweet):
+def media_source(tweet, quotes: list | None = None):
     """The tweet carrying the media.
 
-    Prefers the retweeted tweet for retweets, and falls back to the quoted
-    tweet when a quote tweet has no media of its own (on X the visible image
-    is usually the quoted post's).
+    Prefers the retweeted tweet for retweets, then walks the quote chain: on X
+    the visible image on a quote tweet is usually the quoted post's, and for
+    nested quotes it can live in the innermost tweet.
     """
     source = getattr(tweet, "retweeted_tweet", None) or tweet
-    if not (getattr(source, "media", None) or []):
+    if getattr(source, "media", None):
+        return source
+
+    if quotes is None:
         quote = getattr(source, "quote", None)
-        if quote is not None and (getattr(quote, "media", None) or []):
+        quotes = [quote] if quote is not None else []
+    for quote in quotes:
+        if getattr(quote, "media", None):
             return quote
     return source
 
 
-def image_urls(tweet) -> list[str]:
+def image_urls(tweet, quotes: list | None = None) -> list[str]:
     """Up to 4 photo URLs at 'medium' size (keeps blobs under Bluesky's limit)."""
     urls: list[str] = []
-    for m in getattr(media_source(tweet), "media", None) or []:
+    for m in getattr(media_source(tweet, quotes), "media", None) or []:
         if type(m).__name__ != "Photo":
             continue
         url = getattr(m, "media_url", None)
@@ -186,9 +195,9 @@ def image_urls(tweet) -> list[str]:
     return urls[:4]
 
 
-def fetch_images(tweet) -> list[bytes]:
+def fetch_images(tweet, quotes: list | None = None) -> list[bytes]:
     """Download a tweet's photos. Failures are skipped, not fatal."""
-    return [b for b in (_try_fetch(u) for u in image_urls(tweet)) if b]
+    return [b for b in (_try_fetch(u) for u in image_urls(tweet, quotes)) if b]
 
 
 def pick_video_stream(media) -> str | None:
@@ -220,14 +229,14 @@ def pick_video_stream(media) -> str | None:
     return url
 
 
-def fetch_media(tweet) -> dict:
+def fetch_media(tweet, quotes: list | None = None) -> dict:
     """Return {"images": [...], "video": bytes|None, "thumb": bytes|None}.
 
     A tweet has either photos or one video/GIF (X doesn't mix them). For video
     we download a size-capped MP4 plus the thumbnail (used as a fallback image
     if the video can't be sent).
     """
-    for m in getattr(media_source(tweet), "media", None) or []:
+    for m in getattr(media_source(tweet, quotes), "media", None) or []:
         if type(m).__name__ in ("Video", "AnimatedGif"):
             thumb_url = getattr(m, "media_url", None)
             video_url = pick_video_stream(m)
@@ -236,7 +245,7 @@ def fetch_media(tweet) -> dict:
                 "video": _try_fetch(video_url, timeout=90.0) if video_url else None,
                 "thumb": _try_fetch(thumb_url) if thumb_url else None,
             }
-    return {"images": fetch_images(tweet), "video": None, "thumb": None}
+    return {"images": fetch_images(tweet, quotes), "video": None, "thumb": None}
 
 
 def send_media_post(bsky: BskyClient, body: str, media: dict, reply):
@@ -269,6 +278,49 @@ def quoted_tweet(tweet):
     return getattr(source, "quote", None)
 
 
+async def fetch_tweet_by_id(x: XClient, tweet_id: str):
+    """Fetch a single tweet by id.
+
+    twikit's own ``get_tweet_by_id`` is broken (KeyError parsing conversation
+    entries), so this calls the same endpoint and pulls out just the target
+    tweet, skipping the fragile reply/related parsing.
+    """
+    response, _ = await x.gql.tweet_detail(tweet_id, None)
+    if response.get("errors"):
+        return None
+    entries = find_dict(response, "entries", find_one=True)
+    if not entries:
+        return None
+    for entry in entries[0]:
+        if entry.get("entryId") == f"tweet-{tweet_id}":
+            return tweet_from_data(x, entry)
+    return None
+
+
+async def resolve_quote_chain(x: XClient, tweet, max_depth: int = MAX_QUOTE_DEPTH) -> list:
+    """Return the chain of quoted tweets, innermost last.
+
+    X only embeds ONE level of quoting in timeline responses, so a quote of a
+    quote arrives with its inner tweet missing — losing the original context
+    (and often the only image). When that happens we re-fetch the middle tweet
+    by id, which does include its own quote.
+    """
+    chain: list = []
+    quote = quoted_tweet(tweet)
+    while quote is not None and len(chain) < max_depth:
+        chain.append(quote)
+        nested = getattr(quote, "quote", None)
+        if nested is None and getattr(quote, "is_quote_status", False):
+            try:
+                full = await fetch_tweet_by_id(x, quote.id)
+                if full is not None:
+                    nested = getattr(full, "quote", None)
+            except Exception as exc:
+                print(f"  nested quote fetch failed for {quote.id}: {exc!r}")
+        quote = nested
+    return chain
+
+
 def quoted_permalink(tweet) -> str | None:
     """Link to the quoted tweet, when its content wasn't returned by X."""
     source = getattr(tweet, "retweeted_tweet", None) or tweet
@@ -277,7 +329,7 @@ def quoted_permalink(tweet) -> str | None:
     return permalink.get("expanded")
 
 
-def compose(display_name: str, screen_name: str, tweet) -> str:
+def compose(display_name: str, screen_name: str, tweet, quotes: list | None = None) -> str:
     """Build the full Bluesky post text: attribution header + tweet body.
 
     Quote tweets get the quoted tweet's author and text appended, since
@@ -293,14 +345,18 @@ def compose(display_name: str, screen_name: str, tweet) -> str:
     else:
         body = clean(tweet_text(tweet))
 
-    quote = quoted_tweet(tweet)
-    if quote is not None:
+    if quotes is None:
+        quote = quoted_tweet(tweet)
+        quotes = [quote] if quote is not None else []
+
+    for quote in quotes:
         q_handle = getattr(getattr(quote, "user", None), "screen_name", None)
         q_text = clean(tweet_text(quote))
         if q_text or q_handle:
             attribution = f"@{q_handle}" if q_handle else "a post"
             body = f"{body}\n\n[Quoting {attribution}: {q_text}]"
-    else:
+
+    if not quotes:
         # X sometimes withholds the quoted tweet entirely (deleted, or from a
         # suspended/protected account). Fall back to its permalink so the post
         # still shows it was quoting something, rather than reading oddly.
@@ -435,8 +491,9 @@ async def process_account(x, bsky, club_state, profiles, label, screen_name) -> 
     to_post = fresh[:MAX_POSTS_PER_ACCOUNT_PER_RUN]
     posted_up_to = last_id
     for t in to_post:
-        text = compose(name, screen_name, t)
-        media = fetch_media(t)
+        quotes = await resolve_quote_chain(x, t)
+        text = compose(name, screen_name, t, quotes)
+        media = fetch_media(t, quotes)
         try:
             n = post_thread(bsky, text, media)
             posted_up_to = int(t.id)
